@@ -2,7 +2,7 @@ from image_processor import load_image, preprocess_image, save_image
 import os
 
 def main():
-    image_directory = "/home/vergonyah/Desktop" # Change directory later.
+    image_directory = r"C:\Users\Daniel\Desktop\Skyline-Challenege\test-images"
     output_directory = "processed_images/" # Temporarily store image output to ensure image processing is funcitoning. 
     
     # Create output directory if it doesn't exist.

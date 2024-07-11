@@ -1,3 +1,6 @@
 __pycache__/
-/images/
+training-images/background
+training-images/bicyclist
+training-images/car
+training-images/pedestrian
 val2017/

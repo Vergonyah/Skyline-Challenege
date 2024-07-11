@@ -5,7 +5,7 @@ from pycocotools.coco import COCO
 # My current directory for the instances and val2017 folder, and where the images go. Can always change if have to. 
 ann_file = 'instances_val2017.json'
 img_dir = 'val2017'
-output_dir = '../images/'
+output_dir = '../training-images/'
 
 def organize_coco_images(ann_file, img_dir, output_dir):
     # Initialize COCO api for instance annotations
