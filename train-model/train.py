@@ -61,7 +61,7 @@ class COCODataset(torch.utils.data.Dataset):
 
 # Main training function
 def train_model():
-    device = torch.device('cpu')  # Use CPU for training
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
 
     # Load COCO dataset and category IDs
@@ -87,6 +87,7 @@ def train_model():
 
     # Define optimizer, scheduler, and gradient scaler
     num_epochs = 5  # Reduced number of epochs for simplicity
+    model.to(device)
     optimizer = SGD(model.parameters(), lr=0.005, momentum=0.9, weight_decay=0.0005)
     scheduler = StepLR(optimizer, step_size=3, gamma=0.1)
     scaler = GradScaler()
