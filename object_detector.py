@@ -1,42 +1,51 @@
+import torch
+from torchvision.models.detection import fasterrcnn_resnet50_fpn
 import cv2
 import numpy as np
+from pycocotools.coco import COCO
 
-class ObjectDetector:
-    def __init__(self):
-        self.car_cascade = cv2.CascadeClassifier(r'C:\Users\Daniel\Desktop\Skyline-Challenege\haar-cascades\haarcascade_car.xml')
-        self.pedestrian_cascade = cv2.CascadeClassifier(r'C:\Users\Daniel\Desktop\Skyline-Challenege\haar-cascades\haarcascade_fullbody.xml')
-        self.bicycle_cascade = cv2.CascadeClassifier(r'C:\Users\Daniel\Desktop\Skyline-Challenege\haar-cascades\haarcascade_two_wheeler.xml')
+# Load COCO dataset information
+coco = COCO('annotations/instances_train2017.json')
+categories_of_interest = ['car', 'truck', 'person']
+cat_ids = coco.getCatIds(catNms=categories_of_interest)
+category_names = {id: name for id, name in zip(cat_ids, categories_of_interest)}
 
-    def detect_objects(self, img):
-        
-        cars = self.car_cascade.detectMultiScale(img, 1.1, 1)
-        pedestrians = self.pedestrian_cascade.detectMultiScale(img, 1.1, 1)
-        bicycles = self.bicycle_cascade.detectMultiScale(img, 1.1, 1)
-        
-        detections = []
-        for (x, y, w, h) in cars:
-            detections.append(('car', (x, y, w, h)))
-        for (x, y, w, h) in pedestrians:
-            detections.append(('pedestrian', (x, y, w, h)))
-        for (x, y, w, h) in bicycles:
-            detections.append(('bicycle', (x, y, w, h)))
-        
-        return detections
+# Load the trained object detection model
+def load_model(model_path):
+    model = fasterrcnn_resnet50_fpn(weights=None, num_classes=len(categories_of_interest) + 1)
+    model.load_state_dict(torch.load(model_path))
+    model.eval()
+    return model
 
-    def draw_detections(self, img, detections):
-        # If the image is grayscale, convert it to BGR for colored drawing
-        if len(img.shape) == 2 or (len(img.shape) == 3 and img.shape[2] == 1):
-            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
-        
-        for label, (x, y, w, h) in detections:
-            if label == 'car':
-                color = (255, 0, 0)  # Blue for cars
-            elif label == 'pedestrian':
-                color = (0, 255, 0)  # Green for pedestrians
-            else:
-                color = (0, 0, 255)  # Red for bicycles
-            
-            cv2.rectangle(img, (x, y), (x+w, y+h), color, 2)
-            cv2.putText(img, label, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
-        
-        return img
+# Function to process a single frame using the object detection model
+def process_frame(frame, model):
+    # Convert frame from BGR to RGB format
+    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    
+    # Convert frame to tensor and normalize
+    frame_tensor = torch.from_numpy(frame_rgb.transpose((2, 0, 1))).float() / 255.0
+    frame_tensor = frame_tensor.unsqueeze(0)
+    
+    # Make predictions using the model
+    with torch.no_grad():
+        predictions = model(frame_tensor)
+    
+    # Extract boxes, labels, and scores from the predictions
+    boxes = predictions[0]['boxes'].cpu().numpy()
+    labels = predictions[0]['labels'].cpu().numpy()
+    scores = predictions[0]['scores'].cpu().numpy()
+    
+    # Filter predictions based on score threshold
+    threshold = 0.5
+    mask = scores > threshold
+    boxes = boxes[mask]
+    labels = labels[mask]
+    scores = scores[mask]
+    
+    # Draw boxes and labels on the frame
+    for box, label, score in zip(boxes, labels, scores):
+        x1, y1, x2, y2 = map(int, box)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        cv2.putText(frame, f'{category_names[label]}: {score:.2f}', (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+    
+    return frame
