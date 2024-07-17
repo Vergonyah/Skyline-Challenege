@@ -5,40 +5,43 @@ from torch.optim import SGD
 from torch.optim.lr_scheduler import StepLR
 from torch.cuda.amp import GradScaler, autocast
 import cv2
-import numpy as np
 from pycocotools.coco import COCO
 import random
+import torchvision.transforms as T 
+from torchvision.transforms import functional as F
 
-# Define the COCO dataset class
 class COCODataset(torch.utils.data.Dataset):
-    def __init__(self, coco, cat_ids, transforms=None, max_samples=500):
+    def __init__(self, coco, cat_ids, transforms=None, max_samples=5000):
         self.coco = coco
-        self.transforms = transforms
         self.cat_ids = cat_ids
         self.ids = []
         
-        # Get image IDs for the categories of interest
+        # Get image IDs for cars, pedestrians, cyclists.
         for cat_id in cat_ids:
             self.ids.extend(coco.getImgIds(catIds=[cat_id]))
         
         self.ids = list(set(self.ids))
         random.shuffle(self.ids)
-        self.ids = self.ids[:max_samples]  # Limit the dataset size
-        print(f"Dataset size: {len(self.ids)} images")
+        self.ids = self.ids[:max_samples]  
+
+        self.transforms = transforms
+        self.img_transforms = T.Compose([
+            T.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1),
+        ])
 
     def __getitem__(self, index):
         img_id = self.ids[index]
         ann_ids = self.coco.getAnnIds(imgIds=img_id, catIds=self.cat_ids)
         anns = self.coco.loadAnns(ann_ids)
         
-        # Load and prepare the image
+        # Grabs all images from coco dataset.
         img = cv2.imread(f'train2017/{self.coco.imgs[img_id]["file_name"]}')
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         
         boxes = []
         labels = []
         
-        # Extract bounding boxes and labels
+        # Extract bounding boxes and labels.
         for ann in anns:
             x, y, w, h = ann['bbox']
             boxes.append([x, y, x+w, y+h])
@@ -49,8 +52,15 @@ class COCODataset(torch.utils.data.Dataset):
         
         target = {"boxes": boxes, "labels": labels}
         
-        img = torch.from_numpy(img.transpose((2, 0, 1))).float() / 255.0
-        
+        img = F.to_tensor(img)
+        img = self.img_transforms(img)
+
+        # Apply random horizontal flip.
+        if random.random() > 0.5:
+            img = F.hflip(img)
+            boxes[:, [0, 2]] = img.shape[2] - boxes[:, [2, 0]]
+            target["boxes"] = boxes
+
         if self.transforms is not None:
             img, target = self.transforms(img, target)
         
@@ -59,21 +69,17 @@ class COCODataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.ids)
 
-# Main training function
 def train_model():
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
-
-    # Load COCO dataset and category IDs
+    # Only works when I use my Linux installation for some reason? Probably issues with Windows, have to switch to 'cpu' when I run this on my windows installation.
+    device = torch.device('cuda')
+    # Load COCO dataset and category IDs.
     coco = COCO('annotations/instances_train2017.json')
-    categories_of_interest = ['car', 'truck', 'person']
+    categories_of_interest = ['car', 'person', 'bicycle'] 
     cat_ids = coco.getCatIds(catNms=categories_of_interest)
 
     # Initialize dataset and data loader
-    dataset = COCODataset(coco, cat_ids, max_samples=500)
-    data_loader = DataLoader(dataset, batch_size=1, shuffle=True, collate_fn=lambda x: tuple(zip(*x)))
-
-    # Load pre-trained model and move it to the device
+    dataset = COCODataset(coco, cat_ids, max_samples=5000)
+    data_loader = DataLoader(dataset, batch_size=2, shuffle=True, collate_fn=lambda x: tuple(zip(*x)))
     model = fasterrcnn_resnet50_fpn(weights=FasterRCNN_ResNet50_FPN_Weights.DEFAULT)
     model.to(device)
     model.train()
@@ -86,13 +92,12 @@ def train_model():
         in_features=model.roi_heads.box_predictor.bbox_pred.in_features, out_features=num_classes * 4)
 
     # Define optimizer, scheduler, and gradient scaler
-    num_epochs = 5  # Reduced number of epochs for simplicity
+    num_epochs = 50
     model.to(device)
-    optimizer = SGD(model.parameters(), lr=0.005, momentum=0.9, weight_decay=0.0005)
-    scheduler = StepLR(optimizer, step_size=3, gamma=0.1)
+    optimizer = SGD(model.parameters(), lr=0.001, momentum=0.9, weight_decay=0.0005)
+    scheduler = StepLR(optimizer, step_size=5, gamma=0.1)
     scaler = GradScaler()
 
-    print("Starting training...")
     for epoch in range(num_epochs):
         epoch_loss = 0
         for i, (images, targets) in enumerate(data_loader):
@@ -114,12 +119,10 @@ def train_model():
                 print(f"Epoch {epoch+1}/{num_epochs}, Batch {i}/{len(data_loader)}, Loss: {losses.item():.4f}")
         
         scheduler.step()
-        print(f"Epoch {epoch+1}/{num_epochs} complete, Average Loss: {epoch_loss/len(data_loader):.4f}")
 
     # Save the trained model
-    print("Training complete. Saving model...")
+    print("Training complete.")
     torch.save(model.state_dict(), 'object_detection_model.pth')
-    print("Model saved as 'object_detection_model.pth'")
 
 if __name__ == "__main__":
     train_model()
